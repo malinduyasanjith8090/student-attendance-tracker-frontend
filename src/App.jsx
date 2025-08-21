@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable'; // Explicitly import autoTable
 
 function App() {
   const [attendances, setAttendances] = useState([]);
@@ -6,7 +8,10 @@ function App() {
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [toast, setToast] = useState(null); // For pop messages
+  const [toast, setToast] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFilters, setExportFilters] = useState({ className: '', date: '' });
 
   useEffect(() => {
     fetchAttendances();
@@ -76,7 +81,7 @@ function App() {
 
   const showToast = (message, type) => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3000); // Auto-dismiss after 3 seconds
+    setTimeout(() => setToast(null), 3000);
   };
 
   // Calculate summary stats for cards
@@ -84,6 +89,59 @@ function App() {
   const totalPresent = attendances.filter(att => att.status === 'present').length;
   const totalAbsent = attendances.filter(att => att.status === 'absent').length;
   const totalClasses = [...new Set(attendances.map(att => att.className))].length;
+
+  // Filter attendances by search query
+  const filteredAttendances = attendances.filter(att =>
+    att.studentName.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Get unique classes and dates for export modal
+  const uniqueClasses = [...new Set(attendances.map(att => att.className))];
+  const uniqueDates = [...new Set(attendances.map(att => att.date.slice(0, 10)))];
+
+  // Handle PDF export
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text('Student Attendance Report', 20, 20);
+    doc.setFontSize(12);
+    doc.text(`Class: ${exportFilters.className || 'All'}`, 20, 30);
+    doc.text(`Date: ${exportFilters.date || 'All'}`, 20, 38);
+
+    // Filter records based on modal inputs
+    const exportData = attendances.filter(att => 
+      (!exportFilters.className || att.className === exportFilters.className) &&
+      (!exportFilters.date || att.date.slice(0, 10) === exportFilters.date)
+    );
+
+    // Table headers
+    const headers = ['Student', 'Date', 'Class', 'Status'];
+    const data = exportData.map(att => [
+      att.studentName,
+      new Date(att.date).toLocaleDateString(),
+      att.className,
+      att.status
+    ]);
+
+    // Add table using autoTable
+    autoTable(doc, {
+      startY: 50,
+      head: [headers],
+      body: data,
+      theme: 'grid',
+      styles: { fontSize: 10, cellPadding: 2 },
+      headStyles: { fillColor: [0, 128, 128], textColor: [255, 255, 255] },
+    });
+
+    // Add Class Teacher's Name line
+    const finalY = doc.lastAutoTable.finalY || 50;
+    doc.text('Class Teacher\'s Name: _________________________', 20, finalY + 10);
+
+    doc.save('attendance_report.pdf');
+    setShowExportModal(false);
+    setExportFilters({ className: '', date: '' });
+    showToast('PDF exported successfully!', 'success');
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-100 via-teal-50 to-white flex items-center justify-center p-4 sm:p-6 font-sans">
@@ -166,6 +224,80 @@ function App() {
           </p>
         )}
         
+        {/* Search and Export Buttons */}
+        <div className="flex flex-col sm:flex-row items-center gap-4 mb-4">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <input
+              type="text"
+              placeholder="Search by Student Name"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="border-2 border-teal-200 rounded-lg p-2 text-sm font-medium focus:outline-none focus:border-teal-400 transition duration-200 placeholder-gray-400 w-full sm:w-64"
+            />
+            <button
+              onClick={() => setSearchQuery(searchQuery)}
+              className="bg-teal-600 text-white font-semibold text-sm py-2 px-4 rounded-lg hover:bg-teal-700 transition duration-200"
+            >
+              Search
+            </button>
+          </div>
+          <button
+            onClick={() => setShowExportModal(true)}
+            className="bg-blue-600 text-white font-semibold text-sm py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200 w-full sm:w-auto"
+          >
+            Export to PDF
+          </button>
+        </div>
+        
+        {/* Export Modal */}
+        {showExportModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <h2 className="text-xl font-bold text-teal-900 mb-4">Export Attendance Report</h2>
+              <div className="mb-4">
+                <label className="block text-sm font-semibold text-teal-800 mb-1">Select Class</label>
+                <select
+                  value={exportFilters.className}
+                  onChange={(e) => setExportFilters({ ...exportFilters, className: e.target.value })}
+                  className="w-full border-2 border-teal-200 rounded-lg p-2 text-sm font-medium focus:outline-none focus:border-teal-400 bg-white"
+                >
+                  <option value="">All Classes</option>
+                  {uniqueClasses.map(cls => (
+                    <option key={cls} value={cls}>{cls}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-semibold text-teal-800 mb-1">Select Date</label>
+                <select
+                  value={exportFilters.date}
+                  onChange={(e) => setExportFilters({ ...exportFilters, date: e.target.value })}
+                  className="w-full border-2 border-teal-200 rounded-lg p-2 text-sm font-medium focus:outline-none focus:border-teal-400 bg-white"
+                >
+                  <option value="">All Dates</option>
+                  {uniqueDates.map(date => (
+                    <option key={date} value={date}>{date}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setShowExportModal(false)}
+                  className="bg-gray-300 text-gray-800 font-semibold text-sm py-2 px-4 rounded-lg hover:bg-gray-400 transition duration-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleExportPDF}
+                  className="bg-blue-600 text-white font-semibold text-sm py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200"
+                >
+                  Export
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
         {/* Table */}
         <div className="overflow-x-auto rounded-lg border border-teal-200">
           <table className="w-full border-collapse">
@@ -179,7 +311,7 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {attendances.map(att => (
+              {filteredAttendances.map(att => (
                 <tr key={att._id} className="hover:bg-teal-50 transition duration-150">
                   <td className="border border-teal-200 p-4 text-sm font-medium">{att.studentName}</td>
                   <td className="border border-teal-200 p-4 text-sm font-medium">{new Date(att.date).toLocaleDateString()}</td>
